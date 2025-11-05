@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -16,6 +17,11 @@ import (
 var HTTPClient = &http.Client{
 	Timeout: 5 * time.Minute,
 }
+
+// GitHub URL patterns for matching
+var (
+	githubRepoPattern = regexp.MustCompile(`^https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+)`)
+)
 
 // DownloadResult represents the result of a download attempt
 type DownloadResult struct {
@@ -33,6 +39,78 @@ func downloadURL(downloadURL, targetDir string) DownloadResult {
 		URL: downloadURL,
 	}
 
+	// Check if this is a GitHub URL and handle it specially
+	if isGitHubRepoURL(downloadURL) {
+		// Extract owner and repo from URL
+		owner, repo := extractGitHubInfo(downloadURL)
+		if owner != "" && repo != "" {
+			// Generate filename for GitHub repo
+			filename := fmt.Sprintf("%s-%s.zip", owner, repo)
+			filePath := filepath.Join(targetDir, filename)
+			result.FilePath = filePath
+
+			// Check if file already exists - skip if it does
+			if _, err := os.Stat(filePath); err == nil {
+				result.Skipped = true
+				result.Error = fmt.Errorf("file already exists")
+				return result
+			}
+
+			// Try to download from main, master, and HEAD branches
+			branches := []string{"main", "master", "HEAD"}
+			var lastErr error
+
+			for _, branch := range branches {
+				var archiveURL string
+				if branch == "HEAD" {
+					archiveURL = fmt.Sprintf("https://github.com/%s/%s/archive/HEAD.zip", owner, repo)
+				} else {
+					archiveURL = fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/%s.zip", owner, repo, branch)
+				}
+
+				// Try to download from this branch
+				resp, err := HTTPClient.Get(archiveURL)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				defer resp.Body.Close()
+
+				// Check if successful
+				if resp.StatusCode == http.StatusOK {
+					// Create output file
+					outFile, err := os.Create(filePath)
+					if err != nil {
+						result.Error = fmt.Errorf("failed to create file: %w", err)
+						return result
+					}
+
+					// Copy response body to file
+					bytesWritten, err := io.Copy(outFile, resp.Body)
+					outFile.Close()
+
+					if err != nil {
+						// Clean up partial file on error
+						os.Remove(filePath)
+						result.Error = fmt.Errorf("failed to write file: %w", err)
+						return result
+					}
+
+					// Success
+					result.Success = true
+					result.BytesWritten = bytesWritten
+					return result
+				}
+				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+			}
+
+			// All branches failed
+			result.Error = fmt.Errorf("failed to download GitHub repo from all branches: %w", lastErr)
+			return result
+		}
+	}
+
+	// Not a GitHub repo URL or failed to parse - proceed with normal download
 	// Generate filename from URL
 	filename, err := getFilenameFromURL(downloadURL)
 	if err != nil {
@@ -103,6 +181,37 @@ func downloadURL(downloadURL, targetDir string) DownloadResult {
 	result.Success = true
 	result.BytesWritten = bytesWritten
 	return result
+}
+
+// isGitHubRepoURL checks if a URL points to a GitHub repository
+func isGitHubRepoURL(urlStr string) bool {
+	// Skip if already an archive URL or raw content
+	if strings.Contains(urlStr, "/archive/") ||
+		strings.Contains(urlStr, "/releases/") ||
+		strings.Contains(urlStr, "raw.githubusercontent.com") {
+		return false
+	}
+
+	// Check if it matches GitHub repo pattern
+	return githubRepoPattern.MatchString(urlStr)
+}
+
+// extractGitHubInfo extracts owner and repo name from a GitHub URL
+func extractGitHubInfo(urlStr string) (owner, repo string) {
+	matches := githubRepoPattern.FindStringSubmatch(urlStr)
+	if len(matches) >= 3 {
+		owner = matches[1]
+		repo = matches[2]
+
+		// Clean up repo name
+		repo = strings.TrimSuffix(repo, ".git")
+
+		// Remove any path segments after repo name
+		if idx := strings.IndexAny(repo, "/#?"); idx != -1 {
+			repo = repo[:idx]
+		}
+	}
+	return owner, repo
 }
 
 // getFilenameFromURL extracts a filename from a URL
