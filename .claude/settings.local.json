@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"E:\\Workspace.Dev.Go\\TreasureHunter\\ArchiveDownloader\\ArchiveDownloader.exe\" -workers 2 -scan \"E:\\Workspace.Dev.Go\\TreasureHunter\\ArchiveDownloader\\test_data\" --recursive)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
