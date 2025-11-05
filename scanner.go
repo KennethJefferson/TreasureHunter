@@ -75,7 +75,7 @@ func scanDirectoryWithBatches(rootDir string, recursive bool, jobs chan<- string
 
 			// Process each directory in the batch
 			for _, dir := range batch {
-				scanDirectory(dir, false, jobs, stats) // Don't recurse again
+				scanDirectory(dir, true, jobs, stats) // Recurse into subdirectories
 				bar.Add(1)
 			}
 		}

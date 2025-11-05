@@ -1,4 +1,4 @@
-# ArchiveDownloader
+# TreasureHunter - ArchiveDownloader
 
 A fast, concurrent Go application that scans directories for files containing URLs (.url, .md, .html, .txt) and automatically downloads the linked files.
 
